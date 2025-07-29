@@ -193,7 +193,6 @@ def delete_orbit(id: str = Path(...)):
             raise HTTPException(status_code=409, detail="Orbit in use by satellites")
 
     del orbits[id_int]
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # <------------ SATELLITES ENDPOINTS ------------->
@@ -305,4 +304,3 @@ def delete_satellite(id: str = Path(...)):
         raise HTTPException(status_code=404, detail="Satellite not found")
 
     del satellites[id_int]
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
