@@ -305,9 +305,3 @@ async def delete_satellite(id: str = Path(...)):
 
     del satellites[id_int]
     return Response(status_code=204)
-
-# <------------ DELETE /satellites/ ------------->
-@app.delete("/satellites/", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_all_satellites():
-    satellites.clear()
-    return Response(status_code=204)

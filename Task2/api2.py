@@ -1,8 +1,11 @@
 from typing import Optional, Literal, List
 from fastapi import FastAPI, HTTPException, status, Query, Path, Body
 from fastapi import Response
-from pydantic import BaseModel, Field, validator, field_validator
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, UTC
+from math import pi, sqrt, sin, cos, asin, atan2
+from datetime import timezone
+import dateutil.parser
 
 app = FastAPI()
 
@@ -71,6 +74,29 @@ class SatelliteListResponse(BaseModel):
 
 
 # <------------ DATA STORE ------------->
+
+# template
+# from sqlalchemy import create_engine
+# from sqlalchemy.orm import declarative_base, sessionmaker, Session
+# from sqlalchemy.pool import StaticPool
+#
+# engine = create_engine(
+#     "sqlite:///:memory:",
+#     connect_args={"check_same_thread": False},
+#     poolclass=StaticPool,
+# )
+#
+# SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+#
+# Base = declarative_base()
+#
+#
+# def get_db() -> Session:
+#     db = SessionLocal()
+#     try:
+#         yield db
+#     finally:
+#         db.close()
 
 orbits = {
     # 1: {"id": 1, "name": "Starlink-Shell-1", "orbital_altitude": 550.0, "inclination": 53.0, "raan": 120.0},
@@ -306,8 +332,65 @@ async def delete_satellite(id: str = Path(...)):
     del satellites[id_int]
     return Response(status_code=204)
 
-# <------------ DELETE /satellites/ ------------->
-@app.delete("/satellites/", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_all_satellites():
-    satellites.clear()
-    return Response(status_code=204)
+
+# <------------ GET /satellites/{id}/position ------------->
+@app.get("/satellites/{id}/position")
+async def get_satellite_position(
+    id: str = Path(...),
+    timestamp: Optional[str] = Query(None)
+):
+    # --- ID validation ---
+    if not id.isdigit() or int(id) <= 0:
+        raise HTTPException(status_code=400, detail="Invalid ID format or timestamp")
+    sat_id = int(id)
+
+    if sat_id not in satellites:
+        raise HTTPException(status_code=404, detail="Satellite not found")
+    sat = satellites[sat_id]
+
+    # --- timestamp validation ---
+    if timestamp is None:
+        raise HTTPException(status_code=400, detail="Invalid ID format or timestamp")
+
+    try:
+        ts = dateutil.parser.isoparse(timestamp)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        else:
+            ts = ts.astimezone(timezone.utc)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid ID format or timestamp")
+
+    if ts < sat.launch_date.replace(tzinfo=timezone.utc):
+        raise HTTPException(status_code=400, detail="Timestamp before launch date")
+
+    orbit = orbits.get(sat.orbit_id)
+    if orbit is None:
+        raise HTTPException(status_code=400, detail="Orbit not found")
+
+    # --- orbital mechanics constants ---
+    R_earth = 6371.0  # km
+    mu = 398600.4418  # km^3/s^2
+    a = R_earth + orbit.orbital_altitude
+    T = 2 * pi * sqrt(a**3 / mu)
+    omega = 2 * pi / T
+
+    delta_t = (ts - sat.launch_date.replace(tzinfo=timezone.utc)).total_seconds()
+    inclination_r = orbit.inclination * pi / 180.0
+    raan_r = orbit.raan * pi / 180.0
+    initial_longitude_r = sat.initial_longitude * pi / 180.0
+
+    theta = (omega * delta_t + initial_longitude_r) % (2 * pi)
+    lat_r = asin(sin(inclination_r) * sin(theta))
+    lon_r = atan2(cos(inclination_r) * sin(theta), cos(theta)) + raan_r
+
+    def wrap180(x: float) -> float:
+        return ((x + 180) % 360) - 180
+
+    lat = lat_r * 180.0 / pi
+    lon = wrap180(lon_r * 180.0 / pi)
+    alt = orbit.orbital_altitude
+
+    return {"lat": lat, "lon": lon, "alt": alt}
+
+
